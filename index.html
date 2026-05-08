@@ -616,6 +616,67 @@ footer a:hover { opacity: 0.7; }
   .toggle-wm { margin-left: 0; }
 }
 
+/* ===== PHOTO SLIDESHOW GRID ===== */
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+  padding: 12px;
+  background: #000;
+}
+.photo-item {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 6px;
+  cursor: pointer;
+  background: var(--bg-glass);
+}
+.photo-item img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.3s ease;
+}
+.photo-item:hover img { transform: scale(1.05); }
+.photo-num {
+  position: absolute; bottom: 5px; right: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem; font-weight: 700;
+  background: rgba(0,0,0,0.7);
+  color: #fff; padding: 2px 6px;
+  border-radius: 4px;
+}
+.photo-dl-all {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-glass);
+  border-top: 1px solid var(--border);
+  font-size: 0.75rem; color: var(--text-muted);
+}
+.content-type-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem; font-weight: 700;
+  padding: 2px 8px; border-radius: 20px;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  margin-left: 4px;
+}
+.content-type-badge.slideshow {
+  background: rgba(255,176,32,0.12);
+  border: 1px solid rgba(255,176,32,0.25);
+  color: var(--warning);
+}
+.content-type-badge.livephoto {
+  background: rgba(0,229,160,0.1);
+  border: 1px solid rgba(0,229,160,0.2);
+  color: var(--success);
+}
+.content-type-badge.story {
+  background: rgba(255,61,139,0.1);
+  border: 1px solid rgba(255,61,139,0.2);
+  color: #ff85b8;
+}
+
 /* ===== TOOLTIP ===== */
 [data-tip] { position: relative; }
 [data-tip]::after {
@@ -958,17 +1019,12 @@ function formatDuration(sec) {
 }
 
 /* ========================================
-   FETCH VIDEO — tikwm.com (gratis, tanpa API key)
-   Support: TikTok (HD, SD, tanpa watermark, audio)
-   Support: Instagram (via fallback)
+   FETCH — tikwm.com
+   Support: video, foto/slideshow, story, live photo
 ======================================== */
 async function realFetchVideo(url, platform) {
-
-  if (platform === 'tiktok') {
-    return await fetchTikTok(url);
-  } else {
-    return await fetchInstagram(url);
-  }
+  if (platform === 'tiktok') return await fetchTikTok(url);
+  else return await fetchInstagram(url);
 }
 
 /* ---- TikTok via tikwm.com ---- */
@@ -978,33 +1034,79 @@ async function fetchTikTok(url) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `url=${encodeURIComponent(url)}&count=12&cursor=0&web=1&hd=1`
   });
-
   if (!res.ok) throw { message: `Gagal menghubungi API (${res.status}).` };
 
   const json = await res.json();
-  if (json.code !== 0) throw { message: json.msg || 'Video tidak ditemukan atau sudah dihapus.' };
+  if (json.code !== 0) throw { message: json.msg || 'Konten tidak ditemukan atau sudah dihapus.' };
 
-  const d = json.data;
+  const d    = json.data;
   const base = 'https://www.tikwm.com';
 
-  // play = SD video tanpa watermark
-  // hdplay = HD video tanpa watermark
-  // wmplay = video dengan watermark
-  // music_info.play = audio saja — jangan dipakai untuk preview video
-  const sdUrl   = d.play     ? base + d.play     : '#';
-  const hdUrl   = d.hdplay   ? base + d.hdplay   : sdUrl;
-  const nowmUrl = d.play     ? base + d.play     : sdUrl;
+  // Deteksi tipe konten
+  // images[]  → foto slideshow
+  // live_photo → foto live
+  // play       → video biasa / story video
+
+  const isSlideshow  = Array.isArray(d.images) && d.images.length > 0;
+  const isLivePhoto  = !!d.live_photo;
+  const isVideo      = !!d.play;
+
+  let contentType = 'video';
+  if (isSlideshow)  contentType = 'slideshow';
+  else if (isLivePhoto) contentType = 'livephoto';
+
+  const audioUrl = d.music_info?.play
+    ? base + d.music_info.play
+    : (d.music ? base + d.music : null);
+
+  // Foto slideshow
+  if (isSlideshow) {
+    const photos = d.images.map((img, i) => ({
+      url: img.startsWith('http') ? img : base + img,
+      index: i + 1
+    }));
+    return {
+      platform: 'tiktok',
+      contentType: 'slideshow',
+      username:  d.author?.unique_id ? `@${d.author.unique_id}` : '@tiktok_user',
+      duration:  `${photos.length} foto`,
+      title:     d.title || '',
+      thumbnail: d.origin_cover || d.cover || photos[0]?.url || '',
+      photos,
+      urls: { video: null, audio: audioUrl }
+    };
+  }
+
+  // Live photo
+  if (isLivePhoto) {
+    return {
+      platform: 'tiktok',
+      contentType: 'livephoto',
+      username:  d.author?.unique_id ? `@${d.author.unique_id}` : '@tiktok_user',
+      duration:  '—',
+      title:     d.title || '',
+      thumbnail: d.origin_cover || d.cover || '',
+      photos: [{ url: d.live_photo.startsWith('http') ? d.live_photo : base + d.live_photo, index: 1 }],
+      urls: {
+        video: d.play ? base + d.play : null,
+        audio: audioUrl
+      }
+    };
+  }
+
+  // Video / Story biasa
+  const sdUrl = d.play   ? base + d.play   : '#';
+  const hdUrl = d.hdplay ? base + d.hdplay : sdUrl;
 
   return {
     platform: 'tiktok',
+    contentType: 'video',
     username:  d.author?.unique_id ? `@${d.author.unique_id}` : '@tiktok_user',
     duration:  d.duration ? formatDuration(d.duration) : '—',
     title:     d.title || '',
     thumbnail: d.origin_cover || d.cover || '',
-    urls: {
-      video: sdUrl,
-      audio: d.music_info?.play ? base + d.music_info.play : (d.music ? base + d.music : null),
-    }
+    photos:    null,
+    urls: { video: sdUrl, hd: hdUrl, audio: audioUrl }
   };
 }
 
@@ -1015,26 +1117,58 @@ async function fetchInstagram(url) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `url=${encodeURIComponent(url)}&web=1`
   });
-
   if (!res.ok) throw { message: `Gagal menghubungi API (${res.status}).` };
 
   const json = await res.json();
-  if (json.code !== 0) throw { message: json.msg || 'Video tidak ditemukan atau akun privat.' };
+  if (json.code !== 0) throw { message: json.msg || 'Konten tidak ditemukan atau akun privat.' };
 
-  const d = json.data;
+  const d    = json.data;
   const base = 'https://www.tikwm.com';
-  const videoUrl = d.play ? base + d.play : '#';
 
+  // Deteksi tipe konten Instagram
+  const isSlideshow = Array.isArray(d.images) && d.images.length > 0;
+  const isLivePhoto = !!d.live_photo;
+
+  if (isSlideshow) {
+    const photos = d.images.map((img, i) => ({
+      url: img.startsWith('http') ? img : base + img,
+      index: i + 1
+    }));
+    return {
+      platform: 'instagram',
+      contentType: 'slideshow',
+      username:  d.author?.unique_id ? `@${d.author.unique_id}` : '@instagram_user',
+      duration:  `${photos.length} foto`,
+      title:     d.title || '',
+      thumbnail: d.cover || photos[0]?.url || '',
+      photos,
+      urls: { video: null, audio: null }
+    };
+  }
+
+  if (isLivePhoto) {
+    return {
+      platform: 'instagram',
+      contentType: 'livephoto',
+      username:  d.author?.unique_id ? `@${d.author.unique_id}` : '@instagram_user',
+      duration:  '—',
+      title:     d.title || '',
+      thumbnail: d.cover || '',
+      photos: [{ url: d.live_photo.startsWith('http') ? d.live_photo : base + d.live_photo, index: 1 }],
+      urls: { video: d.play ? base + d.play : null, audio: null }
+    };
+  }
+
+  const videoUrl = d.play ? base + d.play : '#';
   return {
     platform: 'instagram',
+    contentType: 'video',
     username:  d.author?.unique_id ? `@${d.author.unique_id}` : '@instagram_user',
     duration:  d.duration ? formatDuration(d.duration) : '—',
     title:     d.title || '',
     thumbnail: d.cover || '',
-    urls: {
-      video: videoUrl,
-      audio: null,
-    }
+    photos:    null,
+    urls: { video: videoUrl, audio: null }
   };
 }
 
@@ -1098,7 +1232,9 @@ async function handleDownload(prefillUrl) {
     // Success
     renderResult(currentResult);
     addHistory(url, platform);
-    showNotif('Video berhasil ditemukan! ✓', 'success');
+    const ct = currentResult.contentType || 'video';
+    const ctMsg = { video: 'Video', slideshow: 'Foto', livephoto: 'Live Photo', story: 'Story' };
+    showNotif(`${ctMsg[ct] || 'Konten'} berhasil ditemukan! ✓`, 'success');
 
   } catch (err) {
     showNotif(err.message || 'Gagal memproses URL. Coba lagi.', 'error');
@@ -1116,7 +1252,13 @@ function renderResult(data) {
   const previewEl = document.getElementById('previewWrap');
   const dlEl      = document.getElementById('dlOptions');
   const isTK      = data.platform === 'tiktok';
-  const noWm      = document.getElementById('noWm').checked;
+  const ct        = data.contentType || 'video';
+
+  // Badge label
+  const ctLabels = { video: '', slideshow: 'Foto', livephoto: 'Live Photo', story: 'Story' };
+  const ctBadge  = ctLabels[ct]
+    ? `<span class="content-type-badge ${ct}">${ctLabels[ct]}</span>`
+    : '';
 
   // Meta bar
   metaEl.innerHTML = `
@@ -1126,6 +1268,7 @@ function renderResult(data) {
         : `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg> Instagram`
       }
     </div>
+    ${ctBadge}
     <span class="result-username">${data.username}</span>
     <span class="result-duration">
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1135,44 +1278,117 @@ function renderResult(data) {
     </span>
   `;
 
-  // Video preview — langsung tampil player
-  const previewUrl = data.urls?.video || '';
-  previewEl.innerHTML = previewUrl && previewUrl !== '#'
-    ? `<video class="video-el" controls autoplay muted playsinline
-        src="${previewUrl}"
-        poster="${data.thumbnail}"
-        onerror="this.parentElement.innerHTML='<div style=\\'color:var(--text-muted);padding:24px;text-align:center;font-size:0.8rem\\'>Preview tidak tersedia.</div>'"
-      ></video>`
-    : `<img class="thumb-img" src="${data.thumbnail}" alt="Thumbnail" loading="lazy" onerror="this.style.display='none'"/>`;
+  // ── PREVIEW ──
+  if (ct === 'slideshow' && data.photos?.length) {
+    // Grid foto
+    const gridItems = data.photos.map(p => `
+      <div class="photo-item" onclick="downloadSinglePhoto('${p.url}', ${p.index})">
+        <img src="${p.url}" loading="lazy" alt="Foto ${p.index}" onerror="this.style.opacity='0.2'"/>
+        <span class="photo-num">${p.index}</span>
+      </div>
+    `).join('');
+    previewEl.innerHTML = `<div class="photo-grid">${gridItems}</div>`;
+  } else if (ct === 'livephoto' && data.photos?.length) {
+    // Live photo — tampilkan thumbnail + badge
+    const p = data.photos[0];
+    previewEl.innerHTML = `
+      <div style="position:relative;">
+        <img class="thumb-img" src="${p.url}" alt="Live Photo" style="width:100%;max-height:320px;object-fit:cover;display:block;"/>
+        <div style="position:absolute;top:10px;left:10px;background:rgba(0,229,160,0.2);border:1px solid rgba(0,229,160,0.4);color:var(--success);font-size:0.65rem;font-weight:700;padding:3px 10px;border-radius:20px;font-family:'JetBrains Mono',monospace;">● LIVE PHOTO</div>
+      </div>
+    `;
+  } else {
+    // Video biasa
+    const previewUrl = data.urls?.video || '';
+    previewEl.innerHTML = previewUrl && previewUrl !== '#'
+      ? `<video class="video-el" controls autoplay muted playsinline
+          src="${previewUrl}"
+          poster="${data.thumbnail}"
+          onerror="this.parentElement.innerHTML='<div style=\\'color:var(--text-muted);padding:24px;text-align:center;font-size:0.8rem\\'>Preview tidak tersedia.</div>'"
+        ></video>`
+      : `<img class="thumb-img" src="${data.thumbnail}" alt="Thumbnail" loading="lazy" onerror="this.style.display='none'"/>`;
+  }
 
-
-
-  // Download buttons — Video & Audio
-  const dlIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+  // ── TOMBOL DOWNLOAD ──
+  const dlIcon    = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
   const audioIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
+  const photoIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
 
-  let dlHtml = `<span class="dl-title">Unduh sebagai</span>`;
-  dlHtml += `
-    <button class="dl-btn video" onclick="triggerDownload('video')" data-tip="Download video MP4">
-      ${dlIcon} Video
-    </button>
-  `;
-  if (data.urls.audio) {
+  let dlHtml = `<span class="dl-title">Unduh</span>`;
+
+  if (ct === 'slideshow') {
     dlHtml += `
-      <button class="dl-btn audio" onclick="triggerDownload('audio')" data-tip="Download audio MP3">
-        ${audioIcon} Audio
+      <button class="dl-btn video" onclick="downloadAllPhotos()" data-tip="Download semua foto (ZIP)">
+        ${photoIcon} Semua Foto
       </button>
     `;
+    if (data.urls.audio) {
+      dlHtml += `<button class="dl-btn audio" onclick="triggerDownload('audio')" data-tip="Download audio MP3">${audioIcon} Audio</button>`;
+    }
+  } else if (ct === 'livephoto') {
+    if (data.photos?.[0]) {
+      dlHtml += `<button class="dl-btn video" onclick="downloadSinglePhoto('${data.photos[0].url}', 1)" data-tip="Download foto">${photoIcon} Foto</button>`;
+    }
+    if (data.urls.video) {
+      dlHtml += `<button class="dl-btn sd" onclick="triggerDownload('video')" data-tip="Download video live">${dlIcon} Video</button>`;
+    }
+    if (data.urls.audio) {
+      dlHtml += `<button class="dl-btn audio" onclick="triggerDownload('audio')">${audioIcon} Audio</button>`;
+    }
+  } else {
+    // Video / Story
+    if (data.urls.video && data.urls.video !== '#') {
+      dlHtml += `<button class="dl-btn video" onclick="triggerDownload('video')" data-tip="Download video MP4">${dlIcon} Video</button>`;
+    }
+    if (data.urls.audio) {
+      dlHtml += `<button class="dl-btn audio" onclick="triggerDownload('audio')" data-tip="Download audio MP3">${audioIcon} Audio</button>`;
+    }
   }
-  dlEl.innerHTML = dlHtml;
 
-  // Show section
+  dlEl.innerHTML = dlHtml;
   showResult();
 }
 
 /* ========================================
-   PLAY PREVIEW — auto embed video
+   DOWNLOAD SINGLE PHOTO
 ======================================== */
+async function downloadSinglePhoto(url, index) {
+  showNotif(`Mengunduh foto ${index}…`, 'info');
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error();
+    const blob = await res.blob();
+    const ext  = blob.type.includes('png') ? '.png' : '.jpg';
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = `DerenDownloader_foto_${index}${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    showNotif(`Foto ${index} berhasil diunduh ✓`, 'success');
+  } catch {
+    const a = document.createElement('a');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    showNotif(`Membuka foto ${index}…`, 'success');
+  }
+}
+
+/* ========================================
+   DOWNLOAD ALL PHOTOS (satu per satu dengan jeda)
+======================================== */
+async function downloadAllPhotos() {
+  if (!currentResult?.photos?.length) return;
+  const photos = currentResult.photos;
+  showNotif(`Mengunduh ${photos.length} foto…`, 'info');
+  for (let i = 0; i < photos.length; i++) {
+    await new Promise(r => setTimeout(r, 600 * i));
+    await downloadSinglePhoto(photos[i].url, photos[i].index);
+  }
+  showNotif(`Semua ${photos.length} foto selesai diunduh ✓`, 'success');
+}
 function playPreview(el, thumb) {
   const videoUrl = currentResult?.urls?.hd || currentResult?.urls?.sd;
   if (!videoUrl || videoUrl === '#') return;
@@ -1367,3 +1583,4 @@ document.getElementById('urlInput').addEventListener('paste', () => {
 </script>
 </body>
 </html>
+
