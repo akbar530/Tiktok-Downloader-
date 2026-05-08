@@ -485,21 +485,16 @@ nav {
   border: 1px solid; cursor: pointer;
   transition: all var(--transition); background: transparent;
 }
-.dl-btn.hd {
+.dl-btn.video {
   border-color: rgba(0,229,255,0.3); color: var(--neon-cyan);
   background: rgba(0,229,255,0.06);
 }
-.dl-btn.hd:hover { background: rgba(0,229,255,0.15); box-shadow: 0 0 16px rgba(0,229,255,0.15); }
-.dl-btn.sd {
-  border-color: var(--border); color: var(--text-secondary);
-  background: var(--bg-glass);
-}
-.dl-btn.sd:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.15); background: var(--bg-glass-hover); }
-.dl-btn.nowm {
+.dl-btn.video:hover { background: rgba(0,229,255,0.15); box-shadow: 0 0 16px rgba(0,229,255,0.15); }
+.dl-btn.audio {
   border-color: rgba(155,92,255,0.3); color: var(--neon-violet);
   background: rgba(155,92,255,0.06);
 }
-.dl-btn.nowm:hover { background: rgba(155,92,255,0.15); box-shadow: 0 0 16px rgba(155,92,255,0.15); }
+.dl-btn.audio:hover { background: rgba(155,92,255,0.15); box-shadow: 0 0 16px rgba(155,92,255,0.15); }
 
 /* ===== HISTORY SECTION ===== */
 .history-section { margin-top: 8px; }
@@ -992,16 +987,23 @@ async function fetchTikTok(url) {
   const d = json.data;
   const base = 'https://www.tikwm.com';
 
+  // play = SD video tanpa watermark
+  // hdplay = HD video tanpa watermark
+  // wmplay = video dengan watermark
+  // music_info.play = audio saja — jangan dipakai untuk preview video
+  const sdUrl   = d.play     ? base + d.play     : '#';
+  const hdUrl   = d.hdplay   ? base + d.hdplay   : sdUrl;
+  const nowmUrl = d.play     ? base + d.play     : sdUrl;
+
   return {
     platform: 'tiktok',
     username:  d.author?.unique_id ? `@${d.author.unique_id}` : '@tiktok_user',
     duration:  d.duration ? formatDuration(d.duration) : '—',
     title:     d.title || '',
-    thumbnail: d.cover || d.origin_cover || '',
+    thumbnail: d.origin_cover || d.cover || '',
     urls: {
-      hd:   d.hdplay   ? base + d.hdplay   : (base + d.play),
-      sd:   d.play     ? base + d.play     : '#',
-      nowm: d.play     ? base + d.play     : null,
+      video: sdUrl,
+      audio: d.music_info?.play ? base + d.music_info.play : (d.music ? base + d.music : null),
     }
   };
 }
@@ -1030,9 +1032,8 @@ async function fetchInstagram(url) {
     title:     d.title || '',
     thumbnail: d.cover || '',
     urls: {
-      hd:   videoUrl,
-      sd:   videoUrl,
-      nowm: null,
+      video: videoUrl,
+      audio: null,
     }
   };
 }
@@ -1134,46 +1135,32 @@ function renderResult(data) {
     </span>
   `;
 
-  // Video preview — langsung tampil player, tidak perlu klik
-  const videoUrl = data.urls?.hd || data.urls?.sd || '';
-  previewEl.innerHTML = videoUrl && videoUrl !== '#'
+  // Video preview — langsung tampil player
+  const previewUrl = data.urls?.video || '';
+  previewEl.innerHTML = previewUrl && previewUrl !== '#'
     ? `<video class="video-el" controls autoplay muted playsinline
-        src="${videoUrl}"
+        src="${previewUrl}"
         poster="${data.thumbnail}"
         onerror="this.parentElement.innerHTML='<div style=\\'color:var(--text-muted);padding:24px;text-align:center;font-size:0.8rem\\'>Preview tidak tersedia.</div>'"
       ></video>`
     : `<img class="thumb-img" src="${data.thumbnail}" alt="Thumbnail" loading="lazy" onerror="this.style.display='none'"/>`;
 
 
-  // Download buttons
+
+  // Download buttons — Video & Audio
+  const dlIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+  const audioIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
+
   let dlHtml = `<span class="dl-title">Unduh sebagai</span>`;
   dlHtml += `
-    <button class="dl-btn hd" onclick="triggerDownload('hd')" data-tip="Kualitas terbaik">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-        <polyline points="7 10 12 15 17 10"/>
-        <line x1="12" y1="15" x2="12" y2="3"/>
-      </svg>
-      HD
-    </button>
-    <button class="dl-btn sd" onclick="triggerDownload('sd')" data-tip="Ukuran file lebih kecil">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-        <polyline points="7 10 12 15 17 10"/>
-        <line x1="12" y1="15" x2="12" y2="3"/>
-      </svg>
-      SD
+    <button class="dl-btn video" onclick="triggerDownload('video')" data-tip="Download video MP4">
+      ${dlIcon} Video
     </button>
   `;
-  // No-watermark button only for TikTok
-  if (isTK) {
+  if (data.urls.audio) {
     dlHtml += `
-      <button class="dl-btn nowm" onclick="triggerDownload('nowm')" data-tip="Tanpa logo TikTok">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-          <line x1="1" y1="1" x2="23" y2="23"/>
-        </svg>
-        Tanpa Watermark
+      <button class="dl-btn audio" onclick="triggerDownload('audio')" data-tip="Download audio MP3">
+        ${audioIcon} Audio
       </button>
     `;
   }
@@ -1217,24 +1204,24 @@ function autoPlayPreview(thumb) {
 /* ========================================
    TRIGGER DOWNLOAD — langsung download, tidak buka tab baru
 ======================================== */
-async function triggerDownload(quality) {
+async function triggerDownload(type) {
   if (!currentResult) return;
-  const link = currentResult.urls[quality];
+  const link = currentResult.urls[type];
   if (!link || link === '#') {
-    showNotif('Link download tidak tersedia untuk kualitas ini.', 'error');
+    showNotif('Link download tidak tersedia.', 'error');
     return;
   }
 
-  const labels = { hd: 'HD', sd: 'SD', nowm: 'Tanpa Watermark' };
-  showNotif(`Menyiapkan unduhan ${labels[quality]}…`, 'info');
+  const labels = { video: 'Video', audio: 'Audio' };
+  const exts   = { video: '.mp4', audio: '.mp3' };
+  showNotif(`Menyiapkan unduhan ${labels[type]}…`, 'info');
 
   try {
     const res = await fetch(link);
     if (!res.ok) throw new Error();
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
-    const ext = blob.type.includes('mp3') ? '.mp3' : '.mp4';
-    const filename = `DerenDownloader_${quality}${ext}`;
+    const filename = `DerenDownloader_${type}${exts[type]}`;
 
     const a = document.createElement('a');
     a.href = blobUrl;
@@ -1244,18 +1231,18 @@ async function triggerDownload(quality) {
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
 
-    showNotif(`Mengunduh ${labels[quality]}… ✓`, 'success');
+    showNotif(`${labels[type]} berhasil diunduh ✓`, 'success');
   } catch {
-    // Fallback jika blob gagal (CORS) — pakai direct link
+    // Fallback jika blob gagal (CORS)
     const a = document.createElement('a');
     a.href = link;
-    a.download = `DerenDownloader_${quality}.mp4`;
+    a.download = `DerenDownloader_${type}${exts[type]}`;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    showNotif(`Mengunduh ${labels[quality]}…`, 'success');
+    showNotif(`Mengunduh ${labels[type]}…`, 'success');
   }
 }
 
@@ -1380,4 +1367,3 @@ document.getElementById('urlInput').addEventListener('paste', () => {
 </script>
 </body>
 </html>
-
