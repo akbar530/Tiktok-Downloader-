@@ -963,67 +963,76 @@ function formatDuration(sec) {
 }
 
 /* ========================================
-   FETCH VIDEO — Sesuaikan dengan API kamu
-   
-   Isi bagian ini:
-   1. Ganti API_ENDPOINT dengan URL endpoint API kamu
-   2. Ganti bagian headers jika API kamu pakai key/token
-   3. Sesuaikan bagian "Parse response" dengan struktur
-      JSON yang dikembalikan API kamu
+   FETCH VIDEO — tikwm.com (gratis, tanpa API key)
+   Support: TikTok (HD, SD, tanpa watermark, audio)
+   Support: Instagram (via fallback)
 ======================================== */
 async function realFetchVideo(url, platform) {
 
-  // -----------------------------------------------
-  // 1. KONFIGURASI API — edit bagian ini
-  // -----------------------------------------------
-  const API_ENDPOINT = `downloader.fazzcodex.biz.id?url=${encodeURIComponent(url)}`;
+  if (platform === 'tiktok') {
+    return await fetchTikTok(url);
+  } else {
+    return await fetchInstagram(url);
+  }
+}
 
-  const API_HEADERS = {
-    // Contoh jika pakai API key di header:
-    // 'Authorization': 'Bearer ISI_API_KEY_KAMU',
-    // 'x-api-key': 'ISI_API_KEY_KAMU',
-  };
-  // -----------------------------------------------
-
-  const res = await fetch(API_ENDPOINT, {
-    method: 'GET', // ganti ke 'POST' jika perlu
-    headers: API_HEADERS,
+/* ---- TikTok via tikwm.com ---- */
+async function fetchTikTok(url) {
+  const res = await fetch('https://www.tikwm.com/api/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `url=${encodeURIComponent(url)}&count=12&cursor=0&web=1&hd=1`
   });
 
-  if (!res.ok) {
-    throw { message: `Gagal menghubungi API (${res.status}). Cek endpoint & key.` };
-  }
+  if (!res.ok) throw { message: `Gagal menghubungi API (${res.status}).` };
 
   const json = await res.json();
+  if (json.code !== 0) throw { message: json.msg || 'Video tidak ditemukan atau sudah dihapus.' };
 
-  // -----------------------------------------------
-  // 2. PARSE RESPONSE — sesuaikan dengan JSON API kamu
-  //
-  // Kembalikan objek dengan format ini:
-  // {
-  //   platform,               → 'tiktok' atau 'instagram'
-  //   username: '@nama',
-  //   duration: '0:30',
-  //   title: 'judul video',
-  //   thumbnail: 'https://...jpg',
-  //   urls: {
-  //     hd:   'https://...mp4',   → link download HD
-  //     sd:   'https://...mp4',   → link download SD
-  //     nowm: 'https://...mp4',   → tanpa watermark (null jika tidak ada)
-  //   }
-  // }
-  // -----------------------------------------------
+  const d = json.data;
+  const base = 'https://www.tikwm.com';
 
   return {
-    platform,
-    username:  json.GANTI_FIELD_USERNAME  || '@user',
-    duration:  json.GANTI_FIELD_DURATION  || '—',
-    title:     json.GANTI_FIELD_TITLE     || '',
-    thumbnail: json.GANTI_FIELD_THUMBNAIL || '',
+    platform: 'tiktok',
+    username:  d.author?.unique_id ? `@${d.author.unique_id}` : '@tiktok_user',
+    duration:  d.duration ? formatDuration(d.duration) : '—',
+    title:     d.title || '',
+    thumbnail: d.cover || d.origin_cover || '',
     urls: {
-      hd:   json.GANTI_FIELD_URL_HD   || '#',
-      sd:   json.GANTI_FIELD_URL_SD   || '#',
-      nowm: json.GANTI_FIELD_URL_NOWM || null,
+      hd:   d.hdplay   ? base + d.hdplay   : (base + d.play),
+      sd:   d.play     ? base + d.play     : '#',
+      nowm: d.play     ? base + d.play     : null,
+    }
+  };
+}
+
+/* ---- Instagram via tikwm.com ---- */
+async function fetchInstagram(url) {
+  const res = await fetch('https://www.tikwm.com/api/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `url=${encodeURIComponent(url)}&web=1`
+  });
+
+  if (!res.ok) throw { message: `Gagal menghubungi API (${res.status}).` };
+
+  const json = await res.json();
+  if (json.code !== 0) throw { message: json.msg || 'Video tidak ditemukan atau akun privat.' };
+
+  const d = json.data;
+  const base = 'https://www.tikwm.com';
+  const videoUrl = d.play ? base + d.play : '#';
+
+  return {
+    platform: 'instagram',
+    username:  d.author?.unique_id ? `@${d.author.unique_id}` : '@instagram_user',
+    duration:  d.duration ? formatDuration(d.duration) : '—',
+    title:     d.title || '',
+    thumbnail: d.cover || '',
+    urls: {
+      hd:   videoUrl,
+      sd:   videoUrl,
+      nowm: null,
     }
   };
 }
