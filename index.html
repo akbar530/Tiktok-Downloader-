@@ -1055,14 +1055,14 @@ async function fetchTikTok(url) {
   if (isSlideshow)  contentType = 'slideshow';
   else if (isLivePhoto) contentType = 'livephoto';
 
-  const audioUrl = d.music_info?.play
-    ? base + d.music_info.play
-    : (d.music ? base + d.music : null);
+  const toUrl = (path) => !path ? null : (path.startsWith('http') ? path : base + path);
+
+  const audioUrl = toUrl(d.music_info?.play) || toUrl(d.music);
 
   // Foto slideshow
   if (isSlideshow) {
     const photos = d.images.map((img, i) => ({
-      url: img.startsWith('http') ? img : base + img,
+      url: toUrl(img),
       index: i + 1
     }));
     return {
@@ -1086,17 +1086,17 @@ async function fetchTikTok(url) {
       duration:  '—',
       title:     d.title || '',
       thumbnail: d.origin_cover || d.cover || '',
-      photos: [{ url: d.live_photo.startsWith('http') ? d.live_photo : base + d.live_photo, index: 1 }],
+      photos: [{ url: toUrl(d.live_photo), index: 1 }],
       urls: {
-        video: d.play ? base + d.play : null,
+        video: toUrl(d.play),
         audio: audioUrl
       }
     };
   }
 
   // Video / Story biasa
-  const sdUrl = d.play   ? base + d.play   : '#';
-  const hdUrl = d.hdplay ? base + d.hdplay : sdUrl;
+  const sdUrl = toUrl(d.play)   || '#';
+  const hdUrl = toUrl(d.hdplay) || sdUrl;
 
   return {
     platform: 'tiktok',
@@ -1124,6 +1124,7 @@ async function fetchInstagram(url) {
 
   const d    = json.data;
   const base = 'https://www.tikwm.com';
+  const toUrl = (path) => !path ? null : (path.startsWith('http') ? path : base + path);
 
   // Deteksi tipe konten Instagram
   const isSlideshow = Array.isArray(d.images) && d.images.length > 0;
@@ -1131,7 +1132,7 @@ async function fetchInstagram(url) {
 
   if (isSlideshow) {
     const photos = d.images.map((img, i) => ({
-      url: img.startsWith('http') ? img : base + img,
+      url: toUrl(img),
       index: i + 1
     }));
     return {
@@ -1154,12 +1155,12 @@ async function fetchInstagram(url) {
       duration:  '—',
       title:     d.title || '',
       thumbnail: d.cover || '',
-      photos: [{ url: d.live_photo.startsWith('http') ? d.live_photo : base + d.live_photo, index: 1 }],
-      urls: { video: d.play ? base + d.play : null, audio: null }
+      photos: [{ url: toUrl(d.live_photo), index: 1 }],
+      urls: { video: toUrl(d.play), audio: null }
     };
   }
 
-  const videoUrl = d.play ? base + d.play : '#';
+  const videoUrl = toUrl(d.play) || '#';
   return {
     platform: 'instagram',
     contentType: 'video',
