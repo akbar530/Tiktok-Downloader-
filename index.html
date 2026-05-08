@@ -1110,65 +1110,83 @@ async function fetchTikTok(url) {
   };
 }
 
-/* ---- Instagram via tikwm.com ---- */
+/* ---- Instagram via ssig.app ---- */
 async function fetchInstagram(url) {
-  const res = await fetch('https://www.tikwm.com/api/', {
+  // Coba endpoint 1: snapinsta
+  try { return await fetchIgSnapinsta(url); } catch(e) {}
+  // Fallback: igram
+  try { return await fetchIgIgram(url); } catch(e) {}
+  throw { message: 'Gagal mengambil konten Instagram. Pastikan akun publik dan URL valid.' };
+}
+
+async function fetchIgSnapinsta(url) {
+  const res = await fetch('https://snapinsta.app/api/ajaxSearch', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `url=${encodeURIComponent(url)}&web=1`
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+    body: `q=${encodeURIComponent(url)}&t=media&lang=id`
   });
-  if (!res.ok) throw { message: `Gagal menghubungi API (${res.status}).` };
-
+  if (!res.ok) throw new Error('snapinsta fail');
   const json = await res.json();
-  if (json.code !== 0) throw { message: json.msg || 'Konten tidak ditemukan atau akun privat.' };
+  if (json.status !== 'ok' || !json.data) throw new Error('no data');
 
-  const d    = json.data;
-  const base = 'https://www.tikwm.com';
-  const toUrl = (path) => !path ? null : (path.startsWith('http') ? path : base + path);
+  // Parse HTML response dari snapinsta
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(json.data, 'text/html');
 
-  // Deteksi tipe konten Instagram
-  const isSlideshow = Array.isArray(d.images) && d.images.length > 0;
-  const isLivePhoto = !!d.live_photo;
+  const videoEl = doc.querySelector('video source, video');
+  const imgs    = [...doc.querySelectorAll('.download-items__thumb img, img[src*="cdninstagram"], img[src*="fbcdn"]')];
+  const dlLinks = [...doc.querySelectorAll('a[href*=".mp4"], a[href*="download"]')];
 
-  if (isSlideshow) {
-    const photos = d.images.map((img, i) => ({
-      url: toUrl(img),
-      index: i + 1
-    }));
-    return {
-      platform: 'instagram',
-      contentType: 'slideshow',
-      username:  d.author?.unique_id ? `@${d.author.unique_id}` : '@instagram_user',
-      duration:  `${photos.length} foto`,
-      title:     d.title || '',
-      thumbnail: d.cover || photos[0]?.url || '',
-      photos,
-      urls: { video: null, audio: null }
-    };
-  }
+  const videoUrl = videoEl?.src || videoEl?.getAttribute('src') || dlLinks[0]?.href || null;
+  const photos   = imgs.map((img, i) => ({ url: img.src, index: i + 1 })).filter(p => p.url);
+  const thumb    = photos[0]?.url || '';
 
-  if (isLivePhoto) {
-    return {
-      platform: 'instagram',
-      contentType: 'livephoto',
-      username:  d.author?.unique_id ? `@${d.author.unique_id}` : '@instagram_user',
-      duration:  '—',
-      title:     d.title || '',
-      thumbnail: d.cover || '',
-      photos: [{ url: toUrl(d.live_photo), index: 1 }],
-      urls: { video: toUrl(d.play), audio: null }
-    };
-  }
+  if (!videoUrl && photos.length === 0) throw new Error('empty parse');
 
-  const videoUrl = toUrl(d.play) || '#';
+  const isSlideshow = photos.length > 1 && !videoUrl;
+
   return {
     platform: 'instagram',
-    contentType: 'video',
-    username:  d.author?.unique_id ? `@${d.author.unique_id}` : '@instagram_user',
-    duration:  d.duration ? formatDuration(d.duration) : '—',
-    title:     d.title || '',
-    thumbnail: d.cover || '',
-    photos:    null,
+    contentType: isSlideshow ? 'slideshow' : 'video',
+    username: '@instagram_user',
+    duration: isSlideshow ? `${photos.length} foto` : '—',
+    title: '',
+    thumbnail: thumb,
+    photos: isSlideshow ? photos : null,
+    urls: { video: videoUrl, audio: null }
+  };
+}
+
+async function fetchIgIgram(url) {
+  const res = await fetch(`https://igram.world/api/convert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url })
+  });
+  if (!res.ok) throw new Error('igram fail');
+  const json = await res.json();
+
+  const medias = json.media || json.medias || json.result || [];
+  if (!medias.length) throw new Error('no media');
+
+  const videoItem = medias.find(m => m.type === 'video' || m.url?.includes('.mp4'));
+  const imgItems  = medias.filter(m => m.type === 'image' || m.url?.includes('.jpg'));
+  const videoUrl  = videoItem?.url || null;
+  const photos    = imgItems.map((m, i) => ({ url: m.url, index: i + 1 }));
+  const thumb     = photos[0]?.url || videoItem?.thumbnail || '';
+  const isSlideshow = photos.length > 1 && !videoUrl;
+
+  return {
+    platform: 'instagram',
+    contentType: isSlideshow ? 'slideshow' : 'video',
+    username: '@instagram_user',
+    duration: isSlideshow ? `${photos.length} foto` : '—',
+    title: '',
+    thumbnail: thumb,
+    photos: isSlideshow ? photos : null,
     urls: { video: videoUrl, audio: null }
   };
 }
