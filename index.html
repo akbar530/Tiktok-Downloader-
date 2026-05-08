@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>VidSnatch — TikTok & Instagram Downloader</title>
+<title>DerenDownloader — TikTok & Instagram Downloader</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <style>
@@ -724,7 +724,7 @@ footer a:hover { opacity: 0.7; }
           </linearGradient>
         </defs>
       </svg>
-      <span>Vid<span class="logo-accent">Snatch</span></span>
+      <span>Deren<span class="logo-accent">Downloader</span></span>
       <span class="nav-badge">BETA</span>
     </div>
     <div class="nav-links">
@@ -840,7 +840,7 @@ footer a:hover { opacity: 0.7; }
 <!-- FOOTER -->
 <footer>
   <div class="footer-inner">
-    <span>© 2025 VidSnatch</span>
+    <span>© 2025 DerenDownloader</span>
     <div class="footer-dot"></div>
     <span>Dibuat untuk keperluan edukasi</span>
     <div class="footer-dot"></div>
@@ -1134,19 +1134,16 @@ function renderResult(data) {
     </span>
   `;
 
-  // Thumbnail preview with play overlay
-  previewEl.innerHTML = `
-    <div class="thumb-wrap" onclick="playPreview(this, '${data.thumbnail}')">
-      <img class="thumb-img" src="${data.thumbnail}" alt="Thumbnail" loading="lazy" onerror="this.style.display='none'"/>
-      <div class="play-overlay">
-        <div class="play-overlay-btn">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8 5v14l11-7z"/>
-          </svg>
-        </div>
-      </div>
-    </div>
-  `;
+  // Video preview — langsung tampil player, tidak perlu klik
+  const videoUrl = data.urls?.hd || data.urls?.sd || '';
+  previewEl.innerHTML = videoUrl && videoUrl !== '#'
+    ? `<video class="video-el" controls autoplay muted playsinline
+        src="${videoUrl}"
+        poster="${data.thumbnail}"
+        onerror="this.parentElement.innerHTML='<div style=\\'color:var(--text-muted);padding:24px;text-align:center;font-size:0.8rem\\'>Preview tidak tersedia.</div>'"
+      ></video>`
+    : `<img class="thumb-img" src="${data.thumbnail}" alt="Thumbnail" loading="lazy" onerror="this.style.display='none'"/>`;
+
 
   // Download buttons
   let dlHtml = `<span class="dl-title">Unduh sebagai</span>`;
@@ -1187,49 +1184,79 @@ function renderResult(data) {
 }
 
 /* ========================================
-   PLAY PREVIEW
+   PLAY PREVIEW — auto embed video
 ======================================== */
 function playPreview(el, thumb) {
-  // Use the HD or SD url from currentResult for actual video preview
   const videoUrl = currentResult?.urls?.hd || currentResult?.urls?.sd;
-  if (!videoUrl || videoUrl === '#') {
-    showNotif('Preview tidak tersedia. Gunakan tombol Unduh.', 'info');
-    return;
-  }
-  // Replace thumb with actual HTML5 video player
+  if (!videoUrl || videoUrl === '#') return;
   el.innerHTML = `
     <video class="video-el" controls autoplay playsinline
       src="${videoUrl}"
       poster="${thumb}"
-      onerror="this.outerHTML='<div style=\'color:var(--text-muted);padding:20px;font-size:0.8rem\'>Tidak dapat memutar video. Gunakan tombol Unduh.</div>'"
+      onerror="this.parentElement.innerHTML='<div style=\'color:var(--text-muted);padding:20px;text-align:center;font-size:0.8rem\'>Preview tidak tersedia. Gunakan tombol Unduh.</div>'"
     ></video>
   `;
 }
 
 /* ========================================
-   TRIGGER DOWNLOAD
+   AUTO PREVIEW — dipanggil setelah result muncul
 ======================================== */
-function triggerDownload(quality) {
+function autoPlayPreview(thumb) {
+  const previewEl = document.getElementById('previewWrap');
+  const videoUrl  = currentResult?.urls?.hd || currentResult?.urls?.sd;
+  if (!videoUrl || videoUrl === '#') return;
+  previewEl.innerHTML = `
+    <video class="video-el" controls autoplay muted playsinline
+      src="${videoUrl}"
+      poster="${thumb}"
+      onerror="this.parentElement.innerHTML='<div style=\'color:var(--text-muted);padding:20px;text-align:center;font-size:0.8rem\'>Preview tidak tersedia. Gunakan tombol Unduh.</div>'"
+    ></video>
+  `;
+}
+
+/* ========================================
+   TRIGGER DOWNLOAD — langsung download, tidak buka tab baru
+======================================== */
+async function triggerDownload(quality) {
   if (!currentResult) return;
   const link = currentResult.urls[quality];
   if (!link || link === '#') {
     showNotif('Link download tidak tersedia untuk kualitas ini.', 'error');
     return;
   }
-  const labels = { hd: 'HD', sd: 'SD', nowm: 'Tanpa Watermark' };
-  showNotif(`Membuka link unduh ${labels[quality]}…`, 'success');
 
-  // Create a hidden anchor and click it to trigger download
-  const a = document.createElement('a');
-  a.href = link;
-  a.target = '_blank';
-  a.rel = 'noopener noreferrer';
-  // Try to set download filename
-  const ext = link.includes('.mp3') ? '.mp3' : '.mp4';
-  a.download = `vidsnatch_${quality}${ext}`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const labels = { hd: 'HD', sd: 'SD', nowm: 'Tanpa Watermark' };
+  showNotif(`Menyiapkan unduhan ${labels[quality]}…`, 'info');
+
+  try {
+    const res = await fetch(link);
+    if (!res.ok) throw new Error();
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const ext = blob.type.includes('mp3') ? '.mp3' : '.mp4';
+    const filename = `DerenDownloader_${quality}${ext}`;
+
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+
+    showNotif(`Mengunduh ${labels[quality]}… ✓`, 'success');
+  } catch {
+    // Fallback jika blob gagal (CORS) — pakai direct link
+    const a = document.createElement('a');
+    a.href = link;
+    a.download = `DerenDownloader_${quality}.mp4`;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showNotif(`Mengunduh ${labels[quality]}…`, 'success');
+  }
 }
 
 /* ========================================
@@ -1353,3 +1380,4 @@ document.getElementById('urlInput').addEventListener('paste', () => {
 </script>
 </body>
 </html>
+
