@@ -1011,6 +1011,10 @@ function animateProgress(callback) {
 /* ========================================
    HELPERS
 ======================================== */
+function randCode() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
 function formatDuration(sec) {
   const s = parseInt(sec) || 0;
   const m = Math.floor(s / 60);
@@ -1110,85 +1114,100 @@ async function fetchTikTok(url) {
   };
 }
 
-/* ---- Instagram via ssig.app ---- */
+/* ---- Instagram via instavideosave + fallback ---- */
 async function fetchInstagram(url) {
-  // Coba endpoint 1: snapinsta
-  try { return await fetchIgSnapinsta(url); } catch(e) {}
-  // Fallback: igram
-  try { return await fetchIgIgram(url); } catch(e) {}
+  try { return await fetchIgCobalt(url); } catch(e) {}
+  try { return await fetchIgLoader(url); } catch(e) {}
   throw { message: 'Gagal mengambil konten Instagram. Pastikan akun publik dan URL valid.' };
 }
 
-async function fetchIgSnapinsta(url) {
-  const res = await fetch('https://snapinsta.app/api/ajaxSearch', {
+/* Cobalt API — support reels, posts, stories */
+async function fetchIgCobalt(url) {
+  const res = await fetch('https://api.cobalt.tools/api/json', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'X-Requested-With': 'XMLHttpRequest',
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
     },
-    body: `q=${encodeURIComponent(url)}&t=media&lang=id`
+    body: JSON.stringify({ url, vCodec: 'h264', vQuality: '720', aFormat: 'mp3', isAudioOnly: false })
   });
-  if (!res.ok) throw new Error('snapinsta fail');
+  if (!res.ok) throw new Error('cobalt fail');
   const json = await res.json();
-  if (json.status !== 'ok' || !json.data) throw new Error('no data');
 
-  // Parse HTML response dari snapinsta
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(json.data, 'text/html');
+  // status: redirect | stream | picker | error
+  if (json.status === 'error') throw new Error(json.text || 'cobalt error');
 
-  const videoEl = doc.querySelector('video source, video');
-  const imgs    = [...doc.querySelectorAll('.download-items__thumb img, img[src*="cdninstagram"], img[src*="fbcdn"]')];
-  const dlLinks = [...doc.querySelectorAll('a[href*=".mp4"], a[href*="download"]')];
+  // picker = multiple items (slideshow)
+  if (json.status === 'picker' && json.picker?.length) {
+    const photos = json.picker
+      .filter(p => p.type === 'photo' || p.url)
+      .map((p, i) => ({ url: p.url, thumb: p.thumb, index: i + 1 }));
+    const videos = json.picker.filter(p => p.type === 'video');
+    if (photos.length > 0 && videos.length === 0) {
+      return {
+        platform: 'instagram', contentType: 'slideshow',
+        username: extractIgUsername(url),
+        duration: `${photos.length} foto`, title: '',
+        thumbnail: photos[0].thumb || photos[0].url,
+        photos,
+        urls: { video: null, audio: null }
+      };
+    }
+    // Mixed or video list — return first video
+    const vid = videos[0] || json.picker[0];
+    return {
+      platform: 'instagram', contentType: 'video',
+      username: extractIgUsername(url),
+      duration: '—', title: '',
+      thumbnail: vid.thumb || '',
+      photos: null,
+      urls: { video: vid.url, audio: null }
+    };
+  }
 
-  const videoUrl = videoEl?.src || videoEl?.getAttribute('src') || dlLinks[0]?.href || null;
-  const photos   = imgs.map((img, i) => ({ url: img.src, index: i + 1 })).filter(p => p.url);
-  const thumb    = photos[0]?.url || '';
+  // redirect / stream = single video/audio
+  if (json.status === 'redirect' || json.status === 'stream') {
+    return {
+      platform: 'instagram', contentType: 'video',
+      username: extractIgUsername(url),
+      duration: '—', title: '',
+      thumbnail: '',
+      photos: null,
+      urls: { video: json.url, audio: null }
+    };
+  }
 
-  if (!videoUrl && photos.length === 0) throw new Error('empty parse');
+  throw new Error('cobalt unknown status');
+}
 
-  const isSlideshow = photos.length > 1 && !videoUrl;
-
+/* Fallback: yt-dlp style via savetube */
+async function fetchIgLoader(url) {
+  const res = await fetch(`https://savetube.su/api/convert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, quality: '720' })
+  });
+  if (!res.ok) throw new Error('savetube fail');
+  const json = await res.json();
+  const videoUrl = json?.url || json?.download_url || json?.data?.url;
+  if (!videoUrl) throw new Error('no url');
   return {
-    platform: 'instagram',
-    contentType: isSlideshow ? 'slideshow' : 'video',
-    username: '@instagram_user',
-    duration: isSlideshow ? `${photos.length} foto` : '—',
-    title: '',
-    thumbnail: thumb,
-    photos: isSlideshow ? photos : null,
+    platform: 'instagram', contentType: 'video',
+    username: extractIgUsername(url),
+    duration: '—', title: json.title || '',
+    thumbnail: json.thumbnail || '',
+    photos: null,
     urls: { video: videoUrl, audio: null }
   };
 }
 
-async function fetchIgIgram(url) {
-  const res = await fetch(`https://igram.world/api/convert`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url })
-  });
-  if (!res.ok) throw new Error('igram fail');
-  const json = await res.json();
-
-  const medias = json.media || json.medias || json.result || [];
-  if (!medias.length) throw new Error('no media');
-
-  const videoItem = medias.find(m => m.type === 'video' || m.url?.includes('.mp4'));
-  const imgItems  = medias.filter(m => m.type === 'image' || m.url?.includes('.jpg'));
-  const videoUrl  = videoItem?.url || null;
-  const photos    = imgItems.map((m, i) => ({ url: m.url, index: i + 1 }));
-  const thumb     = photos[0]?.url || videoItem?.thumbnail || '';
-  const isSlideshow = photos.length > 1 && !videoUrl;
-
-  return {
-    platform: 'instagram',
-    contentType: isSlideshow ? 'slideshow' : 'video',
-    username: '@instagram_user',
-    duration: isSlideshow ? `${photos.length} foto` : '—',
-    title: '',
-    thumbnail: thumb,
-    photos: isSlideshow ? photos : null,
-    urls: { video: videoUrl, audio: null }
-  };
+function extractIgUsername(url) {
+  try {
+    const m = url.match(/instagram\.com\/([^/?]+)/);
+    const skip = ['p','reel','tv','stories','reels'];
+    if (m && !skip.includes(m[1])) return `@${m[1]}`;
+  } catch(e) {}
+  return '@instagram_user';
 }
 
 /* ========================================
@@ -1381,7 +1400,7 @@ async function downloadSinglePhoto(url, index) {
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = blobUrl;
-    a.download = `DerenDownloader_foto_${index}${ext}`;
+    a.download = `DerenDownloader_foto_${index}_${randCode()}${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1456,7 +1475,7 @@ async function triggerDownload(type) {
     if (!res.ok) throw new Error();
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
-    const filename = `DerenDownloader_${type}${exts[type]}`;
+    const filename = `DerenDownloader_${type}_${randCode()}${exts[type]}`;
 
     const a = document.createElement('a');
     a.href = blobUrl;
@@ -1471,7 +1490,7 @@ async function triggerDownload(type) {
     // Fallback jika blob gagal (CORS)
     const a = document.createElement('a');
     a.href = link;
-    a.download = `DerenDownloader_${type}${exts[type]}`;
+    a.download = `DerenDownloader_${type}_${randCode()}${exts[type]}`;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     document.body.appendChild(a);
@@ -1602,4 +1621,5 @@ document.getElementById('urlInput').addEventListener('paste', () => {
 </script>
 </body>
 </html>
+
 
